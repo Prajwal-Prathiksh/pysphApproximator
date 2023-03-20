@@ -37,6 +37,6 @@ def get_equations(dest, sources, derv=0, dim=2):
         eqns.append(
             Group(equations=[SPHDerivative(dest=dest, sources=sources)]))
     else:
-        raise NotImplementedError
+        raise NotImplementedError("Only 0th and 1st derivative is implemented")
     return eqns
 

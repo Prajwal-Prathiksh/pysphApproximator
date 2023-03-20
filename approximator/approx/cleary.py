@@ -45,5 +45,5 @@ def get_equations(dest, sources, derv=0, dim=2):
     if derv == 2:
         eqns.append(Group(equations=[ViscosityCleary(dest=dest, sources=sources, nu=1.0, rho0=1.0)]))
     else:
-        raise NotImplementedError
+        raise NotImplementedError("Only 2nd derivative is implemented")
     return eqns

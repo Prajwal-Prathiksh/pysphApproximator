@@ -221,9 +221,9 @@ def get_equations(dest, sources, derv=0, dim=2):
     eqns = []
 
     if not(dim==2):
-        raise NotImplementedError
+        raise NotImplementedError("Only 2D is implemented")
     if not (derv==0):
-        raise NotImplementedError
+        raise NotImplementedError("Only 0th derivative is implemented")
     g0 = []
     g0.append(SummationDensity(dest=dest, sources=sources))
     eqns.append(Group(equations=g0))
