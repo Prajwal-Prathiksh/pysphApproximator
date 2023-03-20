@@ -10,8 +10,7 @@ import glob
 import numpy as np
 
 home = os.path.expanduser("~")
-# base_dir = os.path.join(home, ".sphapprox")
-base_dir = os.path.join(os.getcwd(), ".sphapprox")
+base_dir = os.path.join(home, ".sphapprox")
 if not os.path.exists(base_dir):
     os.mkdir(base_dir)
 thispath = os.path.dirname(os.path.abspath(__file__))
