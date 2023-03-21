@@ -11,9 +11,16 @@ import matplotlib
 from equations import get_equations
 import matplotlib.pyplot as plt
 
+from periodic_bc import (
+    create_ghosts, pre_step_interpolate, pre_step_copy_props_to_ghost1
+)
+
 pi = np.pi
 c0 = 10
 
+def print_dict(d, prefix=''):
+    for k, v in d.items():
+        print(prefix, k, v)
 
 class MyStep(EulerStep):
     # dummy stepper
@@ -28,12 +35,14 @@ class Approximator(Application):
         self.rand = 0
         self.derv = 0
         self.approx = None
+        self.interp_ob = None
+        self.sph_eval_ob = None
 
         self.L = 1.0
 
     def add_user_options(self, group):
         group.add_argument(
-            '--dim', action='store', dest='dim', type=int, default=2,
+            '--dim', action='store', dest='dim', type=int, default=1,
             help='dimesion of the problem')
 
         group.add_argument(
@@ -67,6 +76,12 @@ class Approximator(Application):
             type=int, default=0, choices=[0, 1, 2],
             help="0 is not periodic, 1 is periodic (using domain_manager), 2 is periodic (using custom implementation)"
             )
+            
+        group.add_argument(
+            "--n-layers", action="store", dest="num_layers", type=int, 
+            default=3,
+            help="number of layers for periodic BC (custom implementation)"
+            )
 
         group.add_argument(
             "--frac", action="store", dest="frac",
@@ -81,19 +96,24 @@ class Approximator(Application):
             )
 
     def consume_user_options(self):
-        self.dest = 'fluid'
-        self.sources = ['fluid']
         self.hdx = self.options.hdx
         self.dim = self.options.dim
         self.rand = self.options.perturb
         self.derv = self.options.derv
         self.use_sph = self.options.use_sph
         self.periodic = self.options.periodic
+        self.num_layers = self.options.num_layers
         self.norm = self.options.norm
         self.N = self.options.N
         self.dx = self.L / self.N
         self.frac = self.options.frac
         self._get_approx()
+        
+        self.dest = 'fluid'
+        if self.periodic == 2:
+            self.sources = ['fluid', 'ghost1']
+        else:
+            self.sources = ['fluid']
 
     def _get_approx(self):
         if self.use_sph == 'stan':
@@ -207,7 +227,6 @@ class Approximator(Application):
     def _add_properties(self, particles):
         props = None
         props = self.approx.get_props()
-        print(f'Adding properties : {props}')
 
         for pa in particles:
             x = pa.x
@@ -223,24 +242,34 @@ class Approximator(Application):
                     pa.add_property(prop)
             pa.exact[:] = self.get_function(x, y, z)
             pa.add_output_arrays(output_props)
-        
-        print('\nParticle Arrays:')
-        print('-'*20)
-        for pa in particles:
-            print(f"{pa.name} : ")
-            nfp = pa.get_number_of_particles()
-            print(f"\tNumber of particles : {nfp}")
-            props = sorted(list(pa.get_property_arrays().keys()))
-            print(f"\tProperties : {props}")
-            oprops = sorted(pa.output_property_arrays)
-            print(f"\tOutput Properties : {oprops}")
-        print('-'*20)
 
     def create_particles(self):
         hdx = self.hdx
         particles = [self._get_fluid()]
 
         self._add_properties(particles)
+
+        ghost1_pa, ghost2_pa = create_ghosts(
+            particle_arrays=particles,
+            dim=self.dim, dx=self.dx, num_layers=self.num_layers
+        )
+
+        if self.periodic == 2:
+            particles += [ghost1_pa, ghost2_pa]
+        
+        # print('\nParticle Arrays:')
+        # print('-'*20)
+        # for pa in particles:
+        #     print(f"\n>> {pa.name} : ")
+        #     nfp = pa.get_number_of_particles()
+        #     print(f"\tNumber of particles : {nfp}")
+        #     props = sorted(list(pa.get_property_arrays().keys()))
+        #     # print(f"\tProperties : {props}")
+        #     oprops = sorted(pa.output_property_arrays)
+        #     # print(f"\tOutput Properties : {oprops}")
+        #     print("\tFull Properties :")
+        #     print_dict(pa.get_property_arrays(), '\t')
+        # print('-'*20)
 
         return particles
 
@@ -267,7 +296,11 @@ class Approximator(Application):
             self.dest, self.sources, self.derv, self.dim
         )
 
+        print('\nSolver Equations:')
+        print('-'*20)
         print(eqns)
+        print('-'*20)
+
         return eqns
 
     def create_solver(self):
@@ -279,7 +312,24 @@ class Approximator(Application):
 
     def pre_step(self, solver):
         if self.periodic == 2:
-            pass
+            fluid, ghost1, ghost2 = self.particles
+            # print('\n\n\n\n\nTESTING\n\n\n\n\n')
+            # print('old g2 rho : ', ghost2.rho)
+            self.interp_ob, props_to_interpolate = pre_step_interpolate(
+                particle_arrays=[fluid],
+                ghost2=ghost2,
+                dim=self.dim,
+                interp_ob=self.interp_ob
+            )
+            # print('new g2 rho : ', ghost2.rho)
+
+            # print('\nold g1 rho : ', ghost1.rho)
+            self.sph_eval_ob = pre_step_copy_props_to_ghost1(
+                ghost1=ghost1,
+                ghost2=ghost2,
+                props_to_interpolate=props_to_interpolate
+            )
+            # print('new g1 rho : ', ghost1.rho)
 
     def post_process(self, info):
         from pysph.solver.utils import load
@@ -312,8 +362,6 @@ class Approximator(Application):
         filename = os.path.join(self.output_dir, 'results.npz')
         print(filename)
         np.savez(filename, x=x, y=y, z=z, fc=fc, fe=fe)
-
-
 
 if __name__ == "__main__":
     app = Approximator()
