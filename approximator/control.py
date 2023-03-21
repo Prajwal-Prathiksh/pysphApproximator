@@ -9,7 +9,6 @@ from pysph.sph.integrator import EulerIntegrator
 from pysph.base.nnps import DomainManager
 import matplotlib
 from equations import get_equations
-# matplotlib.use('tkagg')
 import matplotlib.pyplot as plt
 
 pi = np.pi
@@ -65,8 +64,8 @@ class Approximator(Application):
 
         group.add_argument(
             "--periodic", action="store", dest="periodic",
-            type=int, default=0,
-            help="if zero then not periodic"
+            type=int, default=0, choices=[0, 1, 2],
+            help="0 is not periodic, 1 is periodic (using domain_manager), 2 is periodic (using custom implementation)"
             )
 
         group.add_argument(
@@ -112,7 +111,6 @@ class Approximator(Application):
         elif self.use_sph == 'custom':
             import custom as cst
             self.approx = cst
-
 
     def get_function(self, x, y, z):
         if self.dim == 1:
@@ -209,6 +207,7 @@ class Approximator(Application):
     def _add_properties(self, particles):
         props = None
         props = self.approx.get_props()
+        print(f'Adding properties : {props}')
 
         for pa in particles:
             x = pa.x
@@ -224,6 +223,18 @@ class Approximator(Application):
                     pa.add_property(prop)
             pa.exact[:] = self.get_function(x, y, z)
             pa.add_output_arrays(output_props)
+        
+        print('\nParticle Arrays:')
+        print('-'*20)
+        for pa in particles:
+            print(f"{pa.name} : ")
+            nfp = pa.get_number_of_particles()
+            print(f"\tNumber of particles : {nfp}")
+            props = sorted(list(pa.get_property_arrays().keys()))
+            print(f"\tProperties : {props}")
+            oprops = sorted(pa.output_property_arrays)
+            print(f"\tOutput Properties : {oprops}")
+        print('-'*20)
 
     def create_particles(self):
         hdx = self.hdx
@@ -235,7 +246,9 @@ class Approximator(Application):
 
     def create_domain(self):
         L = self.L
-        if self.periodic:
+        if self.periodic in [0, 2]:
+            return
+        elif self.periodic == 1:
             if self.dim == 1:
                 return DomainManager(
                     xmin=0, xmax=L, periodic_in_x=True)
@@ -250,18 +263,23 @@ class Approximator(Application):
 
     def create_equations(self):
         eqns = None
-        eqns = self.approx.get_equations(self.dest, self.sources, self.derv, self.dim)
+        eqns = self.approx.get_equations(
+            self.dest, self.sources, self.derv, self.dim
+        )
 
         print(eqns)
         return eqns
 
     def create_solver(self):
         integrator = EulerIntegrator(fluid=MyStep())
-        return Solver(dim=self.dim,
-                      pfreq=1,
-                      integrator=integrator,
-                      tf=1.0,
-                      dt=1.0)
+        sol = Solver(
+            dim=self.dim, pfreq=1, integrator=integrator, tf=1.0, dt=1.0
+        )
+        return sol
+
+    def pre_step(self, solver):
+        if self.periodic == 2:
+            pass
 
     def post_process(self, info):
         from pysph.solver.utils import load
