@@ -105,19 +105,16 @@ def pre_step_interpolate(
 
         # Set the interpolated values to the ghost particles
         ghost2.get(prop)[:] = data
-    return interp_ob
+    return interp_ob, props_to_interpolate
 
-def pre_step_copy_props_to_ghost1(ghost1, ghost2):
+def pre_step_copy_props_to_ghost1(ghost1, ghost2, props_to_interpolate):
     for i in ghost1.gid:
         g2id = ghost1.g2id[i]
-        ghost1.rho[i] = ghost2.rho[g2id]
-        ghost1.p[i] = ghost2.p[g2id]
-        ghost1.u[i] = ghost2.u[g2id]
-        ghost1.au[i] = ghost2.au[g2id]
-        ghost1.v[i] = ghost2.v[g2id]
-        ghost1.av[i] = ghost2.av[g2id]
-        ghost1.w[i] = ghost2.w[g2id]
-        ghost1.aw[i] = ghost2.aw[g2id]
-
-        ghost1.f[i] = ghost2.f[g2id]
-        ghost1.fx[i] = ghost2.fx[g2id]
+        for prop in props_to_interpolate:
+            if not (prop in ghost1.stride):
+                ghost1.get(prop)[i] = ghost2.get(prop)[g2id]
+            else:
+                st = ghost1.stride[prop]
+                for j in range(st):
+                    ghost1.get(prop)[i*st+j] = ghost2.get(prop)[g2id*st+j]
+                
