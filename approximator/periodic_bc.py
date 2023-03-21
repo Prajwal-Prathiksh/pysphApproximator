@@ -41,10 +41,10 @@ def create_ghosts(particle_arrays, dim, dx, num_layers=2):
         gid = np.arange(len(xr))
     
 
-    ghost2_pa = get_particle_array(
-        name="ghost2", x=xr, y=yr, z=zr, h=hmax, gid=gid
+    ghost2 = get_particle_array(
+        name="ghost2", x=xr, y=yr, z=zr, h=hmax, gid=gid, m=1.
     )
-    ghost2_pa.ensure_properties(particle_arrays[0])
+    ghost2.ensure_properties(particle_arrays[0])
 
     # Create Ghost-1
     _Lx = Lx + dx
@@ -63,22 +63,22 @@ def create_ghosts(particle_arrays, dim, dx, num_layers=2):
         xr, yr, zr = x.ravel(), y.ravel(), z.ravel()
         gid = np.arange(len(xr))
 
-    ghost1_pa = get_particle_array(
-        name="ghost1", x=xr, y=yr, z=zr, h=hmax, gid=gid,
+    ghost1 = get_particle_array(
+        name="ghost1", x=xr, y=yr, z=zr, h=hmax, gid=gid, m=1.
     )
-    ghost1_pa.add_property(
+    ghost1.add_property(
         **{'name': 'g2id', 'data': g2id, 'type': 'unsigned int'}
     )
-    ghost1_pa.ensure_properties(particle_arrays[0])
+    ghost1.ensure_properties(particle_arrays[0])
 
-    return ghost1_pa, ghost2_pa
+    return ghost1, ghost2
 
 def pre_step_interpolate(
-    particle_arrays, ghost2_pa, method, dim, interp_ob=None
-):
+    particle_arrays, ghost2, dim, method='order1', interp_ob=None
+):    
     # Setup interpolator
     if interp_ob is None:
-        x, y, z = ghost2_pa.x, ghost2_pa.y, ghost2_pa.z
+        x, y, z = ghost2.x, ghost2.y, ghost2.z
         interp_ob = Interpolator(
             particle_arrays=particle_arrays,
             x=x, y=y, z=z,
@@ -90,7 +90,6 @@ def pre_step_interpolate(
 
     # Interpolate
     # FIXME: How to interpolate over a generalised set of properties?
-    # FIXME: How to interpolate non-scalar properties?
     rho = interp_ob.interpolate('rho')
     p = interp_ob.interpolate('p')
     u = interp_ob.interpolate('u')
@@ -98,76 +97,42 @@ def pre_step_interpolate(
 
     # FIXME: How to set the values of the ghost particles for a generalised
     # set of properties?
-    ghost2_pa.rho[:] = rho
-    ghost2_pa.p[:] = p
-    ghost2_pa.u[:] = u
-    ghost2_pa.au[:] = au
+    ghost2.rho[:] = rho
+    ghost2.p[:] = p
+    ghost2.u[:] = u
+    ghost2.au[:] = au
 
     if dim > 1:
         v = interp_ob.interpolate('v')
         av = interp_ob.interpolate('av')
-        ghost2_pa.v[:] = v
-        ghost2_pa.av[:] = av
+        ghost2.v[:] = v
+        ghost2.av[:] = av
     if dim > 2:
         w = interp_ob.interpolate('w')
         aw = interp_ob.interpolate('aw')
-        ghost2_pa.w[:] = w
-        ghost2_pa.aw[:] = aw
+        ghost2.w[:] = w
+        ghost2.aw[:] = aw
 
 
     # Additional props
     f = interp_ob.interpolate('f')
-    ghost2_pa.f[:] = f
-    fx = interp_ob.interpolate('fx')
-    ghost2_pa.fx[:] = fx
+    ghost2.f[:] = f
+    # FIXME: How to interpolate non-scalar properties?
+    fx = interp_ob.interpolate_prop_with_stride('fx')
+    ghost2.fx[:] = fx
 
     return interp_ob
 
+def pre_step_copy_props_to_ghost1(ghost1, ghost2):
+    for i in ghost1.gid:
+        g2id = ghost1.g2id[i]
+        ghost1.rho[i] = ghost2.rho[g2id]
+        ghost1.p[i] = ghost2.p[g2id]
+        ghost1.u[i] = ghost2.u[g2id]
+        ghost1.au[i] = ghost2.au[g2id]
+        ghost1.v[i] = ghost2.v[g2id]
+        ghost1.av[i] = ghost2.av[g2id]
+        ghost1.w[i] = ghost2.w[g2id]
+        ghost1.aw[i] = ghost2.aw[g2id]
 
-class CopyPropsToGhost1(Equation):
-    def initialize(
-        self, d_idx, s_idx, d_g2id, d_rho, d_p, d_u, d_au, d_v, d_av, d_w,
-        d_aw, d_f, d_fx, s_rho, s_p, s_u, s_au, s_v, s_av, s_w, s_aw, s_f,
-        s_fx
-    ):
-        idx = declare('int')
-        idx = d_g2id[d_idx]
-
-        # Copy props from ghost2 (source) to ghost1 (destination)
-        d_rho[d_idx] = s_rho[idx]
-        d_p[d_idx] = s_p[idx]
-        d_u[d_idx] = s_u[idx]
-        d_au[d_idx] = s_au[idx]
-        d_v[d_idx] = s_v[idx]
-        d_av[d_idx] = s_av[idx]
-        d_w[d_idx] = s_w[idx]
-        d_aw[d_idx] = s_aw[idx]
-
-        d_f[d_idx] = s_f[idx]
-        d_fx[d_idx] = s_fx[idx]
-
-def pre_step_copy_props_to_ghost1(
-        ghost1_pa, ghost2_pa, dim, t, dt, copy_ob=None
-    ):
-    if copy_ob is None:
-        from pysph.tools.sph_evaluator import SPHEvaluator
-        equations = [
-            Group(
-                equations=[
-                    CopyPropsToGhost1(dest=ghost1_pa.name, sources=ghost2_pa.name)
-                ],
-                real=True, update_nnps=False
-            )
-        ]
-
-        print(equations)
-        
-        copy_ob = SPHEvaluator(
-            arrays=[ghost1_pa, ghost2_pa], equations=equations,
-            dim=dim, kernel=None, backend='cython'
-        )
-    else:
-        copy_ob.update()
-        copy_ob.evaluate(t=t, dt=dt)
-
-    return copy_ob
+        ghost1.f[i] = ghost2.f[g2id]
