@@ -76,51 +76,35 @@ def create_ghosts(particle_arrays, dim, dx, num_layers=2):
 def pre_step_interpolate(
     particle_arrays, ghost2, dim, method='order1', interp_ob=None
 ):    
+    # Get the properties to interpolate
+    props = list(ghost2.get_property_arrays().keys())
+    props_to_ignore = ['pid', 'gid', 'tag', 'g2id', 'm', 'h', 'x', 'y', 'z']
+    props_to_interpolate = sorted([p for p in props if p not in props_to_ignore])
+    
     # Setup interpolator
     if interp_ob is None:
+        print(f"\nInterpolating: {props_to_interpolate}")
+
         x, y, z = ghost2.x, ghost2.y, ghost2.z
         interp_ob = Interpolator(
             particle_arrays=particle_arrays,
             x=x, y=y, z=z,
             method=method,
         )
+    
     # Update positions
     else:
         interp_ob.update_particle_arrays(particle_arrays)
 
-    # Interpolate
-    # FIXME: How to interpolate over a generalised set of properties?
-    rho = interp_ob.interpolate('rho')
-    p = interp_ob.interpolate('p')
-    u = interp_ob.interpolate('u')
-    au = interp_ob.interpolate('au')
+    # Interpolate    
+    for prop in props_to_interpolate:
+        if prop in ghost2.stride:
+            data = interp_ob.interpolate_prop_with_stride(prop)
+        else:
+            data = interp_ob.interpolate(prop)
 
-    # FIXME: How to set the values of the ghost particles for a generalised
-    # set of properties?
-    ghost2.rho[:] = rho
-    ghost2.p[:] = p
-    ghost2.u[:] = u
-    ghost2.au[:] = au
-
-    if dim > 1:
-        v = interp_ob.interpolate('v')
-        av = interp_ob.interpolate('av')
-        ghost2.v[:] = v
-        ghost2.av[:] = av
-    if dim > 2:
-        w = interp_ob.interpolate('w')
-        aw = interp_ob.interpolate('aw')
-        ghost2.w[:] = w
-        ghost2.aw[:] = aw
-
-
-    # Additional props
-    f = interp_ob.interpolate('f')
-    ghost2.f[:] = f
-    # FIXME: How to interpolate non-scalar properties?
-    fx = interp_ob.interpolate_prop_with_stride('fx')
-    ghost2.fx[:] = fx
-
+        # Set the interpolated values to the ghost particles
+        ghost2.get(prop)[:] = data
     return interp_ob
 
 def pre_step_copy_props_to_ghost1(ghost1, ghost2):
@@ -136,3 +120,4 @@ def pre_step_copy_props_to_ghost1(ghost1, ghost2):
         ghost1.aw[i] = ghost2.aw[g2id]
 
         ghost1.f[i] = ghost2.f[g2id]
+        ghost1.fx[i] = ghost2.fx[g2id]
